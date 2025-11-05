@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.orig
+*.log
+.DS_Store
+.venv/
+uv.lock
+artifacts/
+cache/
+archive/
+.env
+.env.*
+.ipynb_checkpoints/
+.pytest_cache/
