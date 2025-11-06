@@ -38,6 +38,8 @@ One Colab notebook handles the full workflow: baseline (TF‑IDF), Unsloth QLoRA
 
 ## Runtime Setup (Colab)
 - Mount Drive at `/content/drive`; set `DRIVE_ROOT=/content/drive/MyDrive/keyword_spam_vlm`.
+- Clone this repository inside `/content` (the notebook now does this automatically)
+  so that `utils.py`, `data/`, and supporting docs are local to the runtime.
 - Create: `artifacts/`, `datasets/`, `cache/images/`.
 - Install pinned deps to avoid Colab drift:
   - `pip install -U "transformers==4.44.*" "accelerate==0.34.*" "peft==0.12.*" "datasets==2.20.*" unsloth bitsandbytes pillow pandas scikit-learn pyarrow tqdm`

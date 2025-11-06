@@ -61,7 +61,11 @@ reach:
 
 1. Open `keyword_spam.ipynb` in Google Colab (GPU runtime – A100 preferred; T4
    works with smaller batch sizes).
-2. Execute the notebook from top to bottom. The cells are organised into the
+2. Execute the notebook from top to bottom. The first setup cells automatically
+   clone this repository into the Colab runtime so that `utils.py`, `data/`, and
+   other assets are available (`sys.path` is updated for you). The cells are
+   organised into the following sections (key narrative extras included by
+   default):
    following sections (key narrative extras included by default):
    - **Executive Introduction** – concise overview of the problem, target, and approach.
    - **Junior Notebook Review (Old Way)** – small, concrete examples showcasing weaknesses
