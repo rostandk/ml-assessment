@@ -66,7 +66,6 @@ reach:
    other assets are available (`sys.path` is updated for you). The cells are
    organised into the following sections (key narrative extras included by
    default):
-   following sections (key narrative extras included by default):
    - **Executive Introduction** – concise overview of the problem, target, and approach.
    - **Junior Notebook Review (Old Way)** – small, concrete examples showcasing weaknesses
      of the legacy method (hashtag spam, CTAs, brand mentions).
@@ -80,7 +79,7 @@ reach:
    - **SFT Preparation** – downloads images from their original URLs (with
      retries) into `/content/cache/images`, logs successes/failures, and builds
      Unsloth-ready JSONL datasets. If an image is missing, prompts explicitly
-     note “image unavailable” and proceed text‑only (mirrored at inference).
+     note “image unavailable” so inference mirrors the text-only fallback.
    - **Fine-Tuning** – runs Unsloth QLoRA with early stopping and
      `metric_for_best_model="eval_macro_f1"`; saves the merged adapters to
      `artifacts/merged_model/`.

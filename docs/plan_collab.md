@@ -42,7 +42,7 @@ One Colab notebook handles the full workflow: baseline (TF‑IDF), Unsloth QLoRA
   so that `utils.py`, `data/`, and supporting docs are local to the runtime.
 - Create: `artifacts/`, `datasets/`, `cache/images/`.
 - Install pinned deps to avoid Colab drift:
-  - `pip install -U "transformers==4.44.*" "accelerate==0.34.*" "peft==0.12.*" "datasets==2.20.*" unsloth bitsandbytes pillow pandas scikit-learn pyarrow tqdm`
+  - `pip install -U "transformers==4.44.*" "accelerate==0.34.*" "peft==0.12.*" "datasets==2.20.*" unsloth bitsandbytes pillow pandas scikit-learn pyarrow tqdm trl`
 - Print CUDA/torch/bitsandbytes; set RNG seeds (`random`, `numpy`, `torch`).
 - Show a “Run Plan” banner: detected GPU (A100/T4), recommended `batch_size`/`grad_accum`, sanity/full run guidance.
 
@@ -97,7 +97,7 @@ One Colab notebook handles the full workflow: baseline (TF‑IDF), Unsloth QLoRA
 ## Training (Unsloth QLoRA) with Early Stopping
 - Load datasets via `datasets.load_dataset('json', ...)`; map to `messages` if missing.
 - `FastVisionModel.from_pretrained(model_id, dtype, max_seq_length, load_in_4bit=True)`; then `get_peft_model(r, alpha, dropout)`.
-- `VisionSFTTrainer` + `TrainingArguments`:
+- `trl.SFTTrainer` + `TrainingArguments` with `UnslothVisionDataCollator`:
   - epochs, per‑device batch size, gradient accumulation, lr, warmup; `bf16=True` when supported;
   - `evaluation_strategy="epoch"`, `save_strategy="epoch"`;
   - `load_best_model_at_end=True`, `metric_for_best_model="eval_macro_f1"`, `greater_is_better=True`;
