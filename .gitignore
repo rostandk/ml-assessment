@@ -6,7 +6,7 @@ __pycache__/
 .DS_Store
 .venv/
 uv.lock
-artifacts/
+# artifacts/
 cache/
 archive/
 .env
