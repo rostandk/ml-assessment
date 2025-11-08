@@ -6,10 +6,11 @@ __pycache__/
 .DS_Store
 .venv/
 uv.lock
-# artifacts/
+artifacts/
 cache/
 archive/
 .env
 .env.*
 .ipynb_checkpoints/
 .pytest_cache/
+*.egg-info/

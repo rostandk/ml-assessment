@@ -1,108 +1,108 @@
-# Keyword Spam Moderation – Colab Workflow
+# Keyword Spam Moderation
 
-This repository now centres on a single Google Colab notebook that reproduces the
-entire multimodal keyword spam pipeline end-to-end: we review the legacy "Old
-Way", train a leakage-free TF‑IDF baseline, fine-tune `Qwen/Qwen3-VL-2B-Instruct`
-with Unsloth QLoRA, run deterministic Transformers inference, sweep policy
-thresholds, curate qualitative examples, and package every artifact for download.
-All previous implementations (code, infra, notebooks, docs) live under
-`archive/` for reference.
+Single-notebook workflow (Google Colab friendly) powered by a modular Python package (`depop`) that handles data loading, caching, baseline benchmarking, Unsloth QLoRA fine-tuning, inference, policy evaluation, and artifact packaging. The notebook is narrative-first: every heavy step is delegated to the workflow API, so cells stay visual and easy to reason about.
 
-## Prerequisites
+## Quick Start
 
-- Python 3.11+ and [uv](https://github.com/astral-sh/uv) for local tooling/tests.
-- Optional: Hugging Face token if the chosen checkpoint is gated.
-- Data files: `data/train_set.tsv` and `data/test_set.tsv` from the assignment.
-
-## 1. Install Local Dependencies
+### Local setup
 
 ```bash
-uv sync
+uv sync              # installs base deps + dev extras
+uv run pytest -q     # run unit tests
 ```
 
-Run the unit tests to verify the helper package builds correctly:
+### Colab setup
 
-```bash
-uv run pytest
+At the top of `keyword_spam.ipynb`, run the install cell:
+
+```python
+%pip install '.[colab]'
 ```
 
-## 2. (Optional) Publish Downloaded Images
+Upload `data/train_set.tsv` and `data/test_set.tsv` (Drive or Colab Files tab), then execute the notebook top-to-bottom. The first cells:
 
-The Colab notebook downloads every `image_url` on demand, so no pre-built cache
-is required. After a run completes, you may optionally publish the cached images
-(to speed up future runs or share with teammates):
+1. Install the extras listed in `pyproject.toml` (`.[colab]`).
+2. Clone this repo into `/content/ml-assessment`.
+3. Initialize the workflow helpers (`RepoManager`, `CacheManager`, `DataModule`, `BaselineModel`, `SFTDatasetBuilder`, `QwenTrainer`, `InferenceRunner`, `EvaluationSuite`, `ArtifactManager`).
 
-```bash
-uv run python utils.py sync-gcs \
-    --source /content/cache/images \
-    --bucket ml-assesment \
-    --prefix images \
-    --public
+A generated Table of Contents (TOC) lets you jump between sections if you need to revisit a stage.
+
+## Architecture Overview
+
+```
+Data TSVs ──► DataModule.load() ──► CacheManager.ensure()
+    │                              │
+    │                              └─► MediaCache bootstrap/download/images
+    │
+    ├─► BaselineModel.run() ──► baseline_metrics.json
+    │
+    └─► SFTDatasetBuilder.build() ──► train/val JSONL
+                                      │
+                                      └─► QwenTrainer.train() ──► merged_model/
+                                                            │
+                                                            └─► InferenceRunner.predict()
+                                                                      │
+                                                                      ├─► EvaluationSuite.threshold_sweep/evaluate
+                                                                      ├─► EvaluationSuite.build_gallery/show_legacy_failures
+                                                                      └─► ArtifactManager.save_* / package
 ```
 
-Or via `gsutil`:
+**Key modules (strict imports at top)**
 
-```bash
-gsutil -m rsync -r /content/cache/images gs://ml-assesment/images
-gsutil -m acl set -R -a public-read gs://ml-assesment/images
-```
+- `depop.settings`: dataclasses + `load_settings()`/`setup_logging()`; detects Colab/local paths, handles dtype defaults.
+- `depop.repo`: clone/pull + sys.path injection.
+- `depop.media`: `MediaCache` for URL normalization, hashed filenames, download retries, zip bootstrap/publish, GCS sync (with zip-slip/timeout guards).
+- `depop.cache`: `CacheManager` ties MediaCache to NotebookSettings (ensure/publish).
+- `depop.data`: TSV loader (schema validation + `label_confidence`), `DataModule`, `BaselineModel`, `SFTDatasetBuilder`.
+- `depop.training`: `QwenTrainer` (Unsloth + TRL). Imports torch/unsloth/trl lazily and raises a clear error if they’re missing.
+- `depop.inference`: `InferenceRunner` with deterministic decoding and optional micro-batching for text-only rows; handles image availability flags consistently.
+- `depop.evaluation`: `EvaluationSuite` for threshold sweep, policy metrics, curated gallery, and a reusable “Old Way” failure sampler.
+- `depop.artifacts`: write metrics/predictions/classification reports and package artifacts.
 
-This step is optional—the notebook functions even when the bucket is empty.
+`utils.py` now re-exports the essentials for backwards compatibility, but the notebook imports from the `depop` package directly.
 
-## 3. Stage the TSV Data
+## Notebook Flow (TOC anchors)
 
-Copy `data/train_set.tsv` and `data/test_set.tsv` somewhere the notebook can
-reach:
+1. **Executive Introduction** (`#exec-intro`)
+2. **Environment Setup** (`#env-setup`) – installs `.[colab]`, clones repo, prints GPU run plan, seeds RNGs.
+3. **Old Way Review** (`#old-way`) – `EvaluationSuite.show_legacy_failures(train_df)` renders the historic weaknesses (hashtags, CTAs, brand mentions).
+4. **Data Preparation / What We Predict** (`#data-prep`) – TSV load, schema validation, `label_confidence`, class balance plot.
+5. **Baseline** (`#baseline`) – TF‑IDF + logistic regression logged to `baseline_metrics.json` via `BaselineModel`.
+6. **SFT Dataset** (`#sft`) – `SFTDatasetBuilder` mirrors prompts for text-only fallback (“image unavailable” note).
+7. **Fine-tuning** (`#train`) – `QwenTrainer` (Unsloth QLoRA + SFTTrainer, early stopping, auto batch/grad accumulation).
+8. **Inference** (`#infer`) – `InferenceRunner` (deterministic decoding; optional micro-batching for text-only rows).
+9. **Evaluation** (`#eval`) – `EvaluationSuite.threshold_sweep/evaluate`, metrics stored in `metrics.json` + `classification_report.json`.
+10. **Curated Gallery** (`#gallery`) – HTML grid for TP/TN/FP/FN (skips missing source rows gracefully).
+11. **Artifacts** (`#artifacts`) – `ArtifactManager` writes predictions, metrics, packaged zip; `CacheManager.publish_if_enabled()` emits a reusable cache ZIP.
 
-- **Recommended**: upload both files to Google Drive and note their paths.
-- Alternatively, upload them directly in the Colab session (Files tab → Upload).
+## Cache Bootstrap & Publish
 
-## 4. Run the Colab Notebook
+- Configure `cache_zip_url`, `cache_zip_path`, `cache_min_images`, and `publish_cache_zip` in the settings cell.
+- First run: `CacheManager.ensure()` bootstraps from the published ZIP (GCS/GitHub release) and only hits origin URLs for missing images. Status is logged to `artifacts/image_download_status.csv`.
+- Subsequent runs skip downloading if the cache already contains the configured number of images.
+- Set `publish_cache_zip=True` to emit a fresh ZIP (`publish_cache_zip_path`). Upload that to your bucket/release to keep fast hand-offs.
 
-1. Open `keyword_spam.ipynb` in Google Colab (GPU runtime – A100 preferred; T4
-   works with smaller batch sizes).
-2. Execute the notebook from top to bottom. The first setup cells automatically
-   clone this repository into the Colab runtime so that `utils.py`, `data/`, and
-   other assets are available (`sys.path` is updated for you). The cells are
-   organised into the following sections (key narrative extras included by
-   default):
-   - **Executive Introduction** – concise overview of the problem, target, and approach.
-   - **Junior Notebook Review (Old Way)** – small, concrete examples showcasing weaknesses
-     of the legacy method (hashtag spam, CTAs, brand mentions).
-   - **What We Predict** – target, label confidence, and how thresholds map to policy.
-   - **Setup** – installs pinned dependencies, mounts Drive, prints a GPU “run
-     plan”, and defines helper utilities (URL normalisation, download/cache,
-     schema checks).
-   - **Baseline** – trains a TF‑IDF + logistic regression model fitted only on
-     the training split (no leakage) and logs metrics to
-     `artifacts/baseline_metrics.json`.
-   - **SFT Preparation** – downloads images from their original URLs (with
-     retries) into `/content/cache/images`, logs successes/failures, and builds
-     Unsloth-ready JSONL datasets. If an image is missing, prompts explicitly
-     note “image unavailable” so inference mirrors the text-only fallback.
-   - **Fine-Tuning** – runs Unsloth QLoRA with early stopping and
-     `metric_for_best_model="eval_macro_f1"`; saves the merged adapters to
-     `artifacts/merged_model/`.
-   - **Inference & Evaluation** – generates deterministic JSON responses,
-     performs a threshold sweep for the demotion policy, records metrics, and
-     writes `predictions_with_decisions.parquet` plus `metrics.json`.
-   - **Curated Gallery** – displays TP/TN/FP/FN examples (with images when
-     available) so you can review successes and failure modes.
-   - **Packaging** – bundles everything into
-     `artifacts/keyword_spam_artifacts.zip` for download. Optional cells show how
-     to export the cache or artifacts back to Drive or GCS.
-3. Download the ZIP (or copy it to Drive) when the final cell completes.
+## Configuration Reference (selected keys)
 
-## 5. Supporting Utilities
+| Key | Description |
+| --- | --- |
+| `model_id` | Hugging Face checkpoint (default `Qwen/Qwen3-VL-2B-Instruct`). |
+| `dtype` | Auto-detected (`bfloat16` when supported, else `float16`). Override if needed. |
+| `cache_zip_url` | Public URL for the bootstrap ZIP (GCS or GitHub release asset). |
+| `publish_cache_zip` | Toggle to emit a ZIP after downloads finish. |
+| `review_threshold` / `demote_threshold` | Default policy thresholds (grid sweep refines them). |
 
-- `utils.py`
-  - URL normalisation, hashed filename generation, on-demand download helpers,
-    and the optional `sync-gcs` CLI (run via `python utils.py sync-gcs --source ...`).
-- `docs/plan_collab.md`
-  - The implementation blueprint used to build the notebook.
+All paths (repo/data/cache/artifacts/sft/model/trainer) are defined in `PathConfig` and respect Colab vs local environments.
 
-## Legacy Materials
+## Testing
 
-All prior experiments, infra templates, and vendor notes remain available under
-`archive/`. Consult them if you need to reconstruct the earlier Ray/MLflow-based
-pipeline or review historical design decisions.
+- `uv run --extra dev pytest -q`
+  - `test_utils.py`: low-level MediaCache behaviors (URL normalization, retries).
+  - `tests/test_data.py`: TSV loader validation.
+  - `tests/test_workflow.py`: cache orchestration, trainer wiring (mocked), inference runner, evaluation helpers.
+
+GPU- and network-heavy components are mocked, so tests run quickly on dev machines.
+
+## Legacy Artifacts
+
+Everything prior to the Colab-only refactor (Ray pipelines, notebooks, docs) lives under `archive/`. Keep them for historical reference or migration notes, but the supported workflow is entirely handled by `depop` + `keyword_spam.ipynb`.
