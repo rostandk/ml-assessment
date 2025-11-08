@@ -5,13 +5,13 @@ from typing import Any, Dict
 
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-try:  # pragma: no cover - optional heavyweight deps
+try:  # pragma: no cover - optional heavyweight deps; be forgiving on import errors
     from datasets import load_dataset as hf_load_dataset
     from transformers import EarlyStoppingCallback
     from trl import SFTTrainer, SFTConfig
     from unsloth import FastVisionModel
     from unsloth.trainer import UnslothVisionDataCollator
-except ModuleNotFoundError:  # type: ignore
+except Exception:  # type: ignore
     hf_load_dataset = None  # type: ignore
     EarlyStoppingCallback = None  # type: ignore
     SFTTrainer = None  # type: ignore

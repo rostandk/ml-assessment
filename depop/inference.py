@@ -12,9 +12,9 @@ try:  # pragma: no cover - torch may be unavailable in tests
 except ModuleNotFoundError:  # type: ignore
     torch = None  # type: ignore
 from PIL import Image
-try:  # pragma: no cover - optional dependency
+try:  # pragma: no cover - optional dependency; catch broad import errors
     from unsloth import FastVisionModel
-except ModuleNotFoundError:  # type: ignore
+except Exception:  # type: ignore
     FastVisionModel = None  # type: ignore
 
 from .media import MediaCache
