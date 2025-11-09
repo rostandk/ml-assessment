@@ -37,3 +37,42 @@ class CacheManager:
     @property
     def media_cache(self) -> MediaCache:
         return self.media
+
+    # ------------------------------------------------------------------
+    # Auto-persist and manifest wiring
+
+    def auto_persist(self) -> None:
+        """Persist cache to GCS if configured in settings."""
+        if not self.settings.cache.gcs_enabled:
+            return
+        self.media.sync_to_gcs(
+            bucket=self.settings.cache.gcs_bucket,
+            prefix=self.settings.cache.gcs_prefix,
+            public=self.settings.cache.gcs_public,
+        )
+
+    def write_manifest(self, status_df, out_path: Path) -> Path:
+        """Create a manifest mapping original URL -> filename -> public URL if available."""
+        import pandas as pd
+        from .media import MediaCache
+
+        rows = []
+        base_url = None
+        if self.settings.cache.gcs_enabled and self.settings.cache.gcs_public:
+            base_url = f"https://storage.googleapis.com/{self.settings.cache.gcs_bucket}/{self.settings.cache.gcs_prefix.strip('/')}/"
+        for rec in status_df.to_dict("records"):
+            url = rec.get("image_url", "")
+            if not url:
+                continue
+            filename = MediaCache.url_to_cache_filename(url)
+            public_url = base_url + filename if base_url else ""
+            rows.append({
+                "image_url": url,
+                "filename": filename,
+                "public_url": public_url,
+                "downloaded": bool(rec.get("downloaded", False)),
+            })
+        df = pd.DataFrame(rows)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_path, index=False)
+        return out_path

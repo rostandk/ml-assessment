@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 from IPython.display import HTML
+from .media import MediaCache
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
 
 from .settings import NotebookSettings
@@ -71,6 +72,10 @@ class EvaluationSuite:
         }
         rows = []
         missing = 0
+        # Compute GCS base if public export is enabled
+        gcs_base = None
+        if self.settings.cache.gcs_enabled and self.settings.cache.gcs_public:
+            gcs_base = f"https://storage.googleapis.com/{self.settings.cache.gcs_bucket}/{self.settings.cache.gcs_prefix.strip('/')}/"
         for name, predicate in categories.items():
             subset = [r for r in predictions.itertuples(index=False) if predicate(r)]
             for row in subset[:max_rows]:
@@ -79,6 +84,15 @@ class EvaluationSuite:
                     missing += 1
                     continue
                 original = matches.iloc[0]
+                # Compute public image URL if configured
+                public_img = ""
+                if gcs_base:
+                    try:
+                        public_img = gcs_base + MediaCache.url_to_cache_filename(
+                            str(matches.iloc[0].get("image_url", ""))
+                        )
+                    except Exception:
+                        public_img = ""
                 rows.append(
                     {
                         "Category": name,
@@ -88,11 +102,12 @@ class EvaluationSuite:
                         "Confidence": f"{row.confidence_pred:.2f}",
                         "Reason": row.reason_pred,
                         "Description": original.get("description", "")[:200],
+                        "Image": f"<img src='{public_img}' width='180'>" if public_img else "",
                     }
                 )
         if not rows:
             return "<p>No examples available.</p>"
-        html = pd.DataFrame(rows).to_html(index=False)
+        html = pd.DataFrame(rows).to_html(index=False, escape=False)
         if missing:
             html = f"<p>Skipped {missing} rows without source data.</p>" + html
         return html

@@ -46,6 +46,10 @@ class CacheConfig:
     zip_url: Optional[str]
     min_images: int
     publish_zip: bool
+    gcs_enabled: bool = False
+    gcs_bucket: str = ""
+    gcs_prefix: str = "images"
+    gcs_public: bool = True
 
 
 @dataclass
@@ -135,6 +139,10 @@ def load_settings(overrides: Optional[dict[str, Any]] = None) -> NotebookSetting
         zip_url=overrides.get("cache_zip_url", "https://storage.googleapis.com/ml-assesment/images/cache.zip"),
         min_images=int(overrides.get("cache_min_images", 1000)),
         publish_zip=bool(overrides.get("publish_cache_zip", False)),
+        gcs_enabled=bool(overrides.get("export_cache_to_gcs", False)),
+        gcs_bucket=str(overrides.get("gcs_bucket", "ml-assesment")),
+        gcs_prefix=str(overrides.get("gcs_prefix", "images")),
+        gcs_public=bool(overrides.get("gcs_public", True)),
     )
 
     training = TrainingConfig(
