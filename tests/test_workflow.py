@@ -7,9 +7,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from depop.cache import CacheManager
+from depop.artifacts import ArtifactManager
 from depop.data import SFTDataset
-from depop.media import MediaCache
+from depop.media import ImageStore
 from depop.inference import InferenceRunner
 from depop.settings import load_settings
 from depop.training import QwenTrainer
@@ -26,26 +26,28 @@ def tmp_settings(tmp_path: Path):
     settings = load_settings(overrides)
     settings.paths.cache_dir.mkdir(parents=True, exist_ok=True)
     settings.paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    settings.gcs.enabled = False  # avoid accidental uploads in tests
     return settings
 
 
-def test_cache_manager_bootstrap(monkeypatch, tmp_settings):
-    cache_manager = CacheManager(tmp_settings)
-    called = {"bootstrap": False, "download": False}
+def test_image_store_ensure_all(monkeypatch, tmp_settings, tmp_path: Path):
+    store = ImageStore(tmp_path / "cache" / "images", gcs_bucket="test-bucket")
 
-    def fake_bootstrap(self):
-        called["bootstrap"] = True
+    def fake_download(self, url: str, **kwargs):
+        p = (self.cache_dir / "example.com" / "a" / "b.jpg")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"ok")
+        return p
 
-    def fake_download_many(self, urls, max_workers=8):
-        called["download"] = True
-        return [{"image_url": url, "downloaded": True} for url in urls]
+    def fake_upload(self, local: Path, url: str) -> str:
+        return f"https://storage.googleapis.com/test-bucket/images/example.com/a/b.jpg"
 
-    monkeypatch.setattr("depop.cache.MediaCache.bootstrap_from_zip", fake_bootstrap)
-    monkeypatch.setattr("depop.cache.MediaCache.download_many", fake_download_many)
+    monkeypatch.setattr(ImageStore, "download", fake_download)
+    monkeypatch.setattr(ImageStore, "upload", fake_upload)
 
-    df = cache_manager.ensure(["a", "b"])
-    assert called["bootstrap"] and called["download"]
-    assert len(df) == 2
+    recs = store.ensure_all(["https://example.com/a/b.jpg"])  # type: ignore[list-item]
+    assert len(recs) == 1
+    assert recs[0]["public_url"].startswith("https://storage.googleapis.com/test-bucket")
 
 
 def test_qwen_trainer_invokes_trainer(monkeypatch, tmp_settings, tmp_path: Path):
@@ -125,7 +127,8 @@ def test_qwen_trainer_invokes_trainer(monkeypatch, tmp_settings, tmp_path: Path)
     monkeypatch.setattr("depop.training.hf_load_dataset", lambda *_, **__: {"train": [], "validation": []})
     monkeypatch.setattr("depop.training.torch", FakeTorch)
 
-    trainer = QwenTrainer(tmp_settings)
+    artifact_manager = ArtifactManager(tmp_settings)
+    trainer = QwenTrainer(tmp_settings, artifact_manager)
     summary = trainer.train(dataset)
     assert "train_result" in summary
     assert summary["model_dir"].exists()
@@ -189,11 +192,44 @@ def test_inference_runner(monkeypatch, tmp_settings, tmp_path: Path):
     monkeypatch.setattr("depop.inference.FastVisionModel", FakeFastVisionModel)
     monkeypatch.setattr("depop.inference.torch", FakeTorch)
 
-    media_cache = tmp_settings.paths.cache_dir
-    media_cache.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("depop.media.MediaCache.download_image", lambda self, url: None)
-    runner = InferenceRunner(tmp_settings, MediaCache(tmp_settings.paths.cache_dir))
+    store = ImageStore(tmp_settings.paths.cache_dir, gcs_bucket="test-bucket")
+    monkeypatch.setattr("depop.media.ImageStore.download", lambda self, url: None)
+    runner = InferenceRunner(tmp_settings, store)
     df = pd.DataFrame({"product_id": ["1"], "description": ["desc"], "image_url": [""], "label": [1]})
     preds = runner.predict(df)
     assert len(preds) == 1
     assert bool(preds.loc[0, "is_spam_pred"]) is True
+
+
+def test_artifact_manager_save_manifest(monkeypatch, tmp_settings, tmp_path: Path):
+    artifact_manager = ArtifactManager(tmp_settings)
+    calls: list[tuple[Path, str]] = []
+
+    def fake_upload(path: Path, prefix: str) -> None:
+        calls.append((path, prefix))
+
+    monkeypatch.setattr(artifact_manager, "_upload_file", fake_upload)  # type: ignore[attr-defined]
+    df = pd.DataFrame([{"image_url": "url", "downloaded": True, "uploaded": True}])
+    output = artifact_manager.save_manifest(df)
+    assert output.exists()
+    assert output.name == "image_manifest.csv"
+    assert calls and calls[0][0] == output
+
+
+def test_artifact_manager_upload_model_dir(monkeypatch, tmp_settings, tmp_path: Path):
+    artifact_manager = ArtifactManager(tmp_settings)
+    model_dir = tmp_path / "model"
+    (model_dir / "sub").mkdir(parents=True)
+    file_a = model_dir / "config.json"
+    file_b = model_dir / "sub" / "weights.bin"
+    file_a.write_text("{}")
+    file_b.write_bytes(b"0")
+
+    uploaded: list[Path] = []
+
+    def fake_upload(path: Path, prefix: str) -> None:
+        uploaded.append(path)
+
+    monkeypatch.setattr(artifact_manager, "_upload_file", fake_upload)  # type: ignore[attr-defined]
+    artifact_manager.upload_model_dir(model_dir)
+    assert set(uploaded) == {file_a, file_b}

@@ -2,8 +2,7 @@
 
 from .settings import NotebookSettings, load_settings, setup_logging
 from .repo import RepoManager
-from .media import MediaCache
-from .cache import CacheManager
+from .media import ImageStore
 from .data import DataModule, BaselineModel, SFTDatasetBuilder
 
 __all__ = [
@@ -11,8 +10,7 @@ __all__ = [
     "load_settings",
     "setup_logging",
     "RepoManager",
-    "MediaCache",
-    "CacheManager",
+    "ImageStore",
     "DataModule",
     "BaselineModel",
     "SFTDatasetBuilder",

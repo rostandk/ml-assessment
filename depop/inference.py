@@ -17,7 +17,7 @@ try:  # pragma: no cover - optional dependency; catch broad import errors
 except Exception:  # type: ignore
     FastVisionModel = None  # type: ignore
 
-from .media import MediaCache
+from .media import ImageStore
 from .settings import NotebookSettings
 
 
@@ -35,9 +35,9 @@ class PredictionRecord:
 class InferenceRunner:
     """Deterministic Transformers inference with optional micro batching."""
 
-    def __init__(self, settings: NotebookSettings, media_cache: MediaCache):
+    def __init__(self, settings: NotebookSettings, image_store: ImageStore):
         self.settings = settings
-        self.media_cache = media_cache
+        self.image_store = image_store
 
     def predict(self, df: pd.DataFrame, micro_batch_size: Optional[int] = None) -> pd.DataFrame:
         if torch is None or FastVisionModel is None:
@@ -78,7 +78,7 @@ class InferenceRunner:
 
         for record in df.to_dict("records"):
             url = record.get("image_url") or ""
-            image_path = self.media_cache.download_image(url) if url else None
+            image_path = self.image_store.download(url) if url else None
             has_image = bool(image_path and image_path.exists())
             if has_image or not micro_batch_size:
                 flush_buffer()
@@ -137,7 +137,7 @@ class InferenceRunner:
         ]
         return tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
-    def _encode_prompt(self, tokenizer, prompt: str, pil_image: Optional[Image.Image], device: torch.device):
+    def _encode_prompt(self, tokenizer, prompt: str, pil_image: Optional[Image.Image], device:torch.device):
         if pil_image is not None:
             encoded = tokenizer(pil_image, prompt, add_special_tokens=False, return_tensors="pt")
             pil_image.close()

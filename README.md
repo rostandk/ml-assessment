@@ -23,16 +23,16 @@ Upload `data/train_set.tsv` and `data/test_set.tsv` (Drive or Colab Files tab), 
 
 1. Install the extras listed in `pyproject.toml` (`.[colab]`).
 2. Clone this repo into `/content/ml-assessment`.
-3. Initialize the workflow helpers (`RepoManager`, `CacheManager`, `DataModule`, `BaselineModel`, `SFTDatasetBuilder`, `QwenTrainer`, `InferenceRunner`, `EvaluationSuite`, `ArtifactManager`).
+3. Initialize the workflow helpers (`RepoManager`, `ImageStore`, `DataModule`, `BaselineModel`, `SFTDatasetBuilder`, `QwenTrainer`, `InferenceRunner`, `EvaluationSuite`, `ArtifactManager`).
 
 A generated Table of Contents (TOC) lets you jump between sections if you need to revisit a stage.
 
 ## Architecture Overview
 
 ```
-Data TSVs ──► DataModule.load() ──► CacheManager.ensure()
+Data TSVs ──► DataModule.load() ──► ImageStore.ensure_all()
     │                              │
-    │                              └─► MediaCache bootstrap/download/images
+    │                              └─► download + public GCS upload + manifest
     │
     ├─► BaselineModel.run() ──► baseline_metrics.json
     │
@@ -51,8 +51,7 @@ Data TSVs ──► DataModule.load() ──► CacheManager.ensure()
 
 - `depop.settings`: dataclasses + `load_settings()`/`setup_logging()`; detects Colab/local paths, handles dtype defaults.
 - `depop.repo`: clone/pull + sys.path injection.
-- `depop.media`: `MediaCache` for URL normalization, hashed filenames, download retries, zip bootstrap/publish, GCS sync (with zip-slip/timeout guards).
-- `depop.cache`: `CacheManager` ties MediaCache to NotebookSettings (ensure/publish).
+- `depop.media`: `ImageStore` for deterministic path‑based naming, download, and public GCS upload with idempotency + manifest.
 - `depop.data`: TSV loader (schema validation + `label_confidence`), `DataModule`, `BaselineModel`, `SFTDatasetBuilder`.
 - `depop.training`: `QwenTrainer` (Unsloth + TRL). Imports torch/unsloth/trl lazily and raises a clear error if they’re missing.
 - `depop.inference`: `InferenceRunner` with deterministic decoding and optional micro-batching for text-only rows; handles image availability flags consistently.
@@ -73,14 +72,20 @@ Data TSVs ──► DataModule.load() ──► CacheManager.ensure()
 8. **Inference** (`#infer`) – `InferenceRunner` (deterministic decoding; optional micro-batching for text-only rows).
 9. **Evaluation** (`#eval`) – `EvaluationSuite.threshold_sweep/evaluate`, metrics stored in `metrics.json` + `classification_report.json`.
 10. **Curated Gallery** (`#gallery`) – HTML grid for TP/TN/FP/FN (skips missing source rows gracefully).
-11. **Artifacts** (`#artifacts`) – `ArtifactManager` writes predictions, metrics, packaged zip; `CacheManager.publish_if_enabled()` emits a reusable cache ZIP.
+11. **Artifacts** (`#artifacts`) – `ArtifactManager` writes predictions, metrics, manifest CSVs, and a packaged zip for hand-offs.
 
-## Cache Bootstrap & Publish
+## Image Cache & Public GCS
 
-- Configure `cache_zip_url`, `cache_zip_path`, `cache_min_images`, and `publish_cache_zip` in the settings cell.
-- First run: `CacheManager.ensure()` bootstraps from the published ZIP (GCS/GitHub release) and only hits origin URLs for missing images. Status is logged to `artifacts/image_download_status.csv`.
-- Subsequent runs skip downloading if the cache already contains the configured number of images.
-- Set `publish_cache_zip=True` to emit a fresh ZIP (`publish_cache_zip_path`). Upload that to your bucket/release to keep fast hand-offs.
+- `ImageStore.ensure_all()` deterministically maps each URL to `cache/images/<host>/<path>` and downloads only the missing files.
+- Every successful download is uploaded to your configured public GCS bucket so that future runs can skip network hits. Configure the bucket/prefixes in `config.py`.
+- `ArtifactManager.save_manifest()` writes `artifacts/image_manifest.csv`, listing `image_url`, `relative_path`, `local_path`, and the resulting public URL. Share this CSV with collaborators or feed it into offline batch jobs.
+- Grant anonymous read access once:
+
+```bash
+gsutil iam ch allUsers:objectViewer gs://ml-assesment
+```
+
+- Because filenames are derived from URL paths, repeated runs will reuse and re-upload the same objects idempotently.
 
 ## Configuration Reference (selected keys)
 
@@ -88,8 +93,8 @@ Data TSVs ──► DataModule.load() ──► CacheManager.ensure()
 | --- | --- |
 | `model_id` | Hugging Face checkpoint (default `Qwen/Qwen3-VL-2B-Instruct`). |
 | `dtype` | Auto-detected (`bfloat16` when supported, else `float16`). Override if needed. |
-| `cache_zip_url` | Public URL for the bootstrap ZIP (GCS or GitHub release asset). |
-| `publish_cache_zip` | Toggle to emit a ZIP after downloads finish. |
+| `GCS_BUCKET` / `GCS_IMAGES_PREFIX` | Public bucket + prefix used by `ImageStore.upload()` and manifest publication. |
+| `LOCAL_IMAGE_CACHE` | Folder where images land on Colab (`/content/cache/images` by default). |
 | `review_threshold` / `demote_threshold` | Default policy thresholds (grid sweep refines them). |
 
 All paths (repo/data/cache/artifacts/sft/model/trainer) are defined in `PathConfig` and respect Colab vs local environments.
@@ -97,9 +102,8 @@ All paths (repo/data/cache/artifacts/sft/model/trainer) are defined in `PathConf
 ## Testing
 
 - `uv run --extra dev pytest -q`
-  - `test_utils.py`: low-level MediaCache behaviors (URL normalization, retries).
-  - `tests/test_data.py`: TSV loader validation.
-  - `tests/test_workflow.py`: cache orchestration, trainer wiring (mocked), inference runner, evaluation helpers.
+  - `tests/test_data.py`: TSV loader validation + schema guards.
+  - `tests/test_workflow.py`: `ImageStore` concurrency, `ArtifactManager` uploads/manifest, trainer wiring (mocked), inference runner.
 
 GPU- and network-heavy components are mocked, so tests run quickly on dev machines.
 

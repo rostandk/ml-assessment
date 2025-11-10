@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
@@ -25,16 +25,18 @@ except ModuleNotFoundError:  # type: ignore
     torch = None  # type: ignore
 
 from .data import SFTDataset
+from .artifacts import ArtifactManager
 from .settings import NotebookSettings
 
 
 class QwenTrainer:
     """Fine-tune Qwen3-VL models via Unsloth + TRL."""
 
-    def __init__(self, settings: NotebookSettings):
+    def __init__(self, settings: NotebookSettings, artifact_manager: ArtifactManager):
         self.settings = settings
+        self.artifact_manager = artifact_manager
 
-    def train(self, dataset: SFTDataset) -> Dict[str, Any]:
+    def train(self, dataset: SFTDataset) -> dict[str, Any]:
         if torch is None or None in (hf_load_dataset, SFTTrainer, SFTConfig, FastVisionModel, UnslothVisionDataCollator, EarlyStoppingCallback):
             raise RuntimeError("Training dependencies (torch/unsloth/trl/transformers/datasets) are required")
         gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
@@ -137,4 +139,5 @@ class QwenTrainer:
         self.settings.paths.model_dir.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(self.settings.paths.model_dir))
         tokenizer.save_pretrained(str(self.settings.paths.model_dir))
+        self.artifact_manager.upload_model_dir(self.settings.paths.model_dir)
         return {"train_result": train_result.metrics, "model_dir": self.settings.paths.model_dir}

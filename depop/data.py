@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, precision_recall_fscore_support
 
-from .media import MediaCache
+from .media import ImageStore
+from .artifacts import ArtifactManager
 from .settings import NotebookSettings
 
 REQUIRED_COLUMNS = ["product_id", "description", "image_url", "label", "yes_count", "no_count"]
@@ -66,7 +67,7 @@ class BaselineModel:
     def __init__(self, settings: NotebookSettings):
         self.settings = settings
 
-    def run(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> Dict[str, Any]:
+    def run(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> dict[str, Any]:
         vectorizer = TfidfVectorizer(max_features=10000, stop_words="english")
         X_train = vectorizer.fit_transform(train_df["description"])
         X_val = vectorizer.transform(val_df["description"])
@@ -98,9 +99,10 @@ class SFTDataset:
 
 
 class SFTDatasetBuilder:
-    def __init__(self, settings: NotebookSettings, media_cache: MediaCache):
+    def __init__(self, settings: NotebookSettings, image_store: ImageStore, artifact_manager: ArtifactManager):
         self.settings = settings
-        self.media_cache = media_cache
+        self.image_store = image_store
+        self.artifact_manager = artifact_manager
 
     def build(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> SFTDataset:
         rows_train = [self._build_record(row) for row in train_df.to_dict("records")]
@@ -111,13 +113,15 @@ class SFTDatasetBuilder:
         val_path = self.settings.paths.sft_dir / "val.jsonl"
         train_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows_train))
         val_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows_val))
+        self.artifact_manager.upload_sft_jsonl(train_path, val_path)
 
         val_labels = val_df["label"].astype(int).reset_index(drop=True).tolist()
         return SFTDataset(rows_train, rows_val, train_path, val_path, val_labels)
 
-    def _build_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        url = record.get("image_url") or ""
-        image_path = self.media_cache.download_image(url) if url else None
+    def _build_record(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        data = dict(record)
+        url = data.get("image_url") or ""
+        image_path = self.image_store.download(url) if url else None
         user_content: list[dict[str, Any]] = []
         note = ""
         if image_path is not None and image_path.exists():
@@ -127,7 +131,7 @@ class SFTDatasetBuilder:
         user_content.append(
             {
                 "type": "text",
-                "text": f"{self.settings.training.prompt_template}\n\nDescription: {record['description']}{note}",
+                "text": f"{self.settings.training.prompt_template}\n\nDescription: {data.get('description', '')}{note}",
             }
         )
         assistant_text = json.dumps(
@@ -139,7 +143,7 @@ class SFTDatasetBuilder:
             ensure_ascii=False,
         )
         return {
-            "id": record.get("product_id"),
+            "id": data.get("product_id"),
             "messages": [
                 {"role": "system", "content": [{"type": "text", "text": "Respond with strict JSON."}]},
                 {"role": "user", "content": user_content},

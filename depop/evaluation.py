@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 from IPython.display import HTML
-from .media import MediaCache
+from .media import ImageStore
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
 
 from .settings import NotebookSettings
+from .media import ImageStore
 
 
 class EvaluationSuite:
@@ -73,9 +74,7 @@ class EvaluationSuite:
         rows = []
         missing = 0
         # Compute GCS base if public export is enabled
-        gcs_base = None
-        if self.settings.cache.gcs_enabled and self.settings.cache.gcs_public:
-            gcs_base = f"https://storage.googleapis.com/{self.settings.cache.gcs_bucket}/{self.settings.cache.gcs_prefix.strip('/')}/"
+        gcs_base = f"https://storage.googleapis.com/{self.settings.gcs.bucket}/{self.settings.gcs.images_prefix.strip('/')}" if self.settings.gcs.enabled else None
         for name, predicate in categories.items():
             subset = [r for r in predictions.itertuples(index=False) if predicate(r)]
             for row in subset[:max_rows]:
@@ -88,9 +87,8 @@ class EvaluationSuite:
                 public_img = ""
                 if gcs_base:
                     try:
-                        public_img = gcs_base + MediaCache.url_to_cache_filename(
-                            str(matches.iloc[0].get("image_url", ""))
-                        )
+                        rel = ImageStore.url_to_relative_path(str(matches.iloc[0].get("image_url", "")))
+                        public_img = f"{gcs_base}/{str(rel).strip('/')}"
                     except Exception:
                         public_img = ""
                 rows.append(
