@@ -50,6 +50,13 @@ def test_image_store_ensure_all(monkeypatch, tmp_settings, tmp_path: Path):
     assert recs[0]["public_url"].startswith("https://storage.googleapis.com/test-bucket")
 
 
+def test_image_store_normalizes_legacy_hosts():
+    url = "https://pictures.depop.com/b0/abc/P0.jpg"
+    normalized = ImageStore.normalize_url(url)
+    assert normalized is not None
+    assert "media-photos.depop.com" in normalized
+
+
 def test_qwen_trainer_invokes_trainer(monkeypatch, tmp_settings, tmp_path: Path):
     dataset = SFTDataset(
         train_rows=[],

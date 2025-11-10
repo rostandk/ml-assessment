@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
+from urllib.parse import urlparse, urlunparse
 
 import requests
 
@@ -16,6 +17,10 @@ LOGGER = logging.getLogger(__name__)
 
 class ImageStore:
     """Deterministic, path-based image store with public GCS upload."""
+
+    LEGACY_HOST_REMAP = {
+        "pictures.depop.com": "media-photos.depop.com",
+    }
 
     def __init__(self, cache_dir: Path, *, gcs_bucket: str, gcs_images_prefix: str = "images") -> None:
         self.cache_dir = Path(cache_dir)
@@ -25,11 +30,29 @@ class ImageStore:
     # ------------------------------------------------------------------
     # Filename helpers
 
-    @staticmethod
-    def normalize_url(url: str | None) -> str | None:
+    @classmethod
+    def normalize_url(cls, url: str | None) -> str | None:
         if not url:
             return None
-        return url.strip()
+        raw = url.strip()
+        parsed = urlparse(raw if "://" in raw else f"https://{raw.lstrip('/')}")
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or ""
+        remapped = cls.LEGACY_HOST_REMAP.get(netloc.lower())
+        netloc = remapped or netloc
+        if not netloc:
+            return raw  # fallback to original string
+        rebuilt = urlunparse(
+            (
+                scheme,
+                netloc,
+                parsed.path or "",
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+        return rebuilt
 
     @classmethod
     def url_to_relative_path(cls, url: str) -> Path:
